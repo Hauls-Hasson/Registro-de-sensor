@@ -1,0 +1,119 @@
+#include <SPI.h>
+#include <USBHost.h>   // For boards with USB host support
+#include <FileSystem.h> // May vary depending on board/library
+
+USBHost usb;
+FileSystem fs;
+
+const int sensorPin = A0;      // Sensor input
+const float threshold = 500.0; // Adjust based on your sensor
+
+bool aboveThreshold = false;
+
+unsigned long startMillis = 0;
+unsigned long currentMillis = 0;
+
+// Time tracking
+unsigned long activationStart = 0; // When system started
+
+File logFile;
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(sensorPin, INPUT);
+
+  usb.begin();
+
+  // Initialize filesystem (USB)
+  if (!fs.begin()) {
+    Serial.println("USB filesystem failed!");
+    while (1);
+  }
+
+  logFile = fs.open("log.txt", FILE_WRITE);
+
+  if (!logFile) {
+    Serial.println("Error opening file!");
+    while (1);
+  }
+
+  activationStart = millis();
+
+  logFile.println("=== SYSTEM START ===");
+  logFile.flush();
+}
+
+void loop() {
+  usb.Task();
+
+  currentMillis = millis();
+
+  float sensorValue = analogRead(sensorPin);
+
+  // Convert millis to "day + time"
+  unsigned long elapsed = currentMillis - activationStart;
+
+  unsigned long totalSeconds = elapsed / 1000;
+  unsigned long ms = elapsed % 1000;
+  unsigned long seconds = totalSeconds % 60;
+  unsigned long minutes = (totalSeconds / 60) % 60;
+  unsigned long hours = (totalSeconds / 3600) % 24;
+  unsigned long days = totalSeconds / 86400;
+
+  // Sensor goes ABOVE threshold
+  if (sensorValue > threshold && !aboveThreshold) {
+    aboveThreshold = true;
+    startMillis = currentMillis;
+
+    logFile.print("START | Day ");
+    logFile.print(days);
+    logFile.print(" | ");
+    printTime(logFile, hours, minutes, seconds, ms);
+    logFile.println();
+
+    logFile.flush();
+  }
+
+  // Sensor goes BELOW threshold
+  if (sensorValue <= threshold && aboveThreshold) {
+    aboveThreshold = false;
+
+    unsigned long duration = currentMillis - startMillis;
+
+    unsigned long d_ms = duration % 1000;
+    unsigned long d_sec = (duration / 1000) % 60;
+    unsigned long d_min = (duration / 60000) % 60;
+    unsigned long d_hr = duration / 3600000;
+
+    logFile.print("STOP  | Day ");
+    logFile.print(days);
+    logFile.print(" | ");
+    printTime(logFile, hours, minutes, seconds, ms);
+
+    logFile.print(" | Duration: ");
+    logFile.print(d_hr); logFile.print("h ");
+    logFile.print(d_min); logFile.print("m ");
+    logFile.print(d_sec); logFile.print("s ");
+    logFile.print(d_ms); logFile.print("ms");
+
+    logFile.println();
+
+    logFile.flush();
+  }
+}
+
+void printTime(File &file, unsigned long h, unsigned long m, unsigned long s, unsigned long ms) {
+  if (h < 10) file.print("0");
+  file.print(h); file.print(":");
+
+  if (m < 10) file.print("0");
+  file.print(m); file.print(":");
+
+  if (s < 10) file.print("0");
+  file.print(s); file.print(".");
+
+  if (ms < 100) file.print("0");
+  if (ms < 10) file.print("0");
+  file.print(ms);
+}
