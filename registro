@@ -1,38 +1,37 @@
 #include <SPI.h>
-#include <USBHost.h>   // For boards with USB host support
-#include <FileSystem.h> // May vary depending on board/library
+#include <USBHost.h>
+#include <FileSystem.h>
 
 USBHost usb;
 FileSystem fs;
 
-const int sensorPin = A0;      // Sensor input
-const float threshold = 500.0; // Adjust based on your sensor
+const int sensorPin = A0;
+const float threshold = 500.0;
 
-bool aboveThreshold = false;
+enum SensorState {
+  BELOW,
+  ABOVE
+};
+
+SensorState currentState = BELOW;
 
 unsigned long startMillis = 0;
-unsigned long currentMillis = 0;
-
-// Time tracking
-unsigned long activationStart = 0; // When system started
+unsigned long activationStart = 0;
 
 File logFile;
 
 void setup() {
   Serial.begin(115200);
-
   pinMode(sensorPin, INPUT);
 
   usb.begin();
 
-  // Initialize filesystem (USB)
   if (!fs.begin()) {
     Serial.println("USB filesystem failed!");
     while (1);
   }
 
   logFile = fs.open("log.txt", FILE_WRITE);
-
   if (!logFile) {
     Serial.println("Error opening file!");
     while (1);
@@ -47,12 +46,10 @@ void setup() {
 void loop() {
   usb.Task();
 
-  currentMillis = millis();
-
+  unsigned long now = millis();
   float sensorValue = analogRead(sensorPin);
 
-  // Convert millis to "day + time"
-  unsigned long elapsed = currentMillis - activationStart;
+  unsigned long elapsed = now - activationStart;
 
   unsigned long totalSeconds = elapsed / 1000;
   unsigned long ms = elapsed % 1000;
@@ -61,45 +58,49 @@ void loop() {
   unsigned long hours = (totalSeconds / 3600) % 24;
   unsigned long days = totalSeconds / 86400;
 
-  // Sensor goes ABOVE threshold
-  if (sensorValue > threshold && !aboveThreshold) {
-    aboveThreshold = true;
-    startMillis = currentMillis;
+  // STATE MACHINE
+  switch (currentState) {
 
-    logFile.print("START | Day ");
-    logFile.print(days);
-    logFile.print(" | ");
-    printTime(logFile, hours, minutes, seconds, ms);
-    logFile.println();
+    case BELOW:
+      if (sensorValue > threshold) {
+        currentState = ABOVE;
+        startMillis = now;
 
-    logFile.flush();
-  }
+        logFile.print("START | Day ");
+        logFile.print(days);
+        logFile.print(" | ");
+        printTime(logFile, hours, minutes, seconds, ms);
+        logFile.println();
+        logFile.flush();
+      }
+      break;
 
-  // Sensor goes BELOW threshold
-  if (sensorValue <= threshold && aboveThreshold) {
-    aboveThreshold = false;
+    case ABOVE:
+      if (sensorValue <= threshold) {
+        currentState = BELOW;
 
-    unsigned long duration = currentMillis - startMillis;
+        unsigned long duration = now - startMillis;
 
-    unsigned long d_ms = duration % 1000;
-    unsigned long d_sec = (duration / 1000) % 60;
-    unsigned long d_min = (duration / 60000) % 60;
-    unsigned long d_hr = duration / 3600000;
+        unsigned long d_ms = duration % 1000;
+        unsigned long d_sec = (duration / 1000) % 60;
+        unsigned long d_min = (duration / 60000) % 60;
+        unsigned long d_hr = duration / 3600000;
 
-    logFile.print("STOP  | Day ");
-    logFile.print(days);
-    logFile.print(" | ");
-    printTime(logFile, hours, minutes, seconds, ms);
+        logFile.print("STOP  | Day ");
+        logFile.print(days);
+        logFile.print(" | ");
+        printTime(logFile, hours, minutes, seconds, ms);
 
-    logFile.print(" | Duration: ");
-    logFile.print(d_hr); logFile.print("h ");
-    logFile.print(d_min); logFile.print("m ");
-    logFile.print(d_sec); logFile.print("s ");
-    logFile.print(d_ms); logFile.print("ms");
+        logFile.print(" | Duration: ");
+        logFile.print(d_hr); logFile.print("h ");
+        logFile.print(d_min); logFile.print("m ");
+        logFile.print(d_sec); logFile.print("s ");
+        logFile.print(d_ms); logFile.print("ms");
 
-    logFile.println();
-
-    logFile.flush();
+        logFile.println();
+        logFile.flush();
+      }
+      break;
   }
 }
 
